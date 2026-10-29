@@ -114,6 +114,8 @@ ul.results li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;ali
 
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
 
 <div id="login">
   <form class="card" id="login-form" autocomplete="on">
@@ -141,7 +143,7 @@ ul.results li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;ali
       <a href="#rotate" data-tab="rotate">PDF Rotate<small>Turn pages 90, 180, 270</small></a>
       <a href="#logo-stamper" data-tab="logo-stamper">Logo Stamper<small>Logo on every page</small></a>
       <a href="#page-numbers" data-tab="page-numbers">Page Numbers<small>Number every page</small></a>
-      <a href="#scanner" data-tab="scanner">PDF Scanner<small>Photos to one PDF</small></a>
+      <a href="#scanner" data-tab="scanner">PDF Scanner<small>Make a PDF look scanned</small></a>
     </nav>
 
     <main>
@@ -284,9 +286,9 @@ ul.results li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;ali
       <!-- SCANNER -->
       <section class="tool" id="tool-scanner" hidden>
         <h2>PDF Scanner</h2>
-        <p class="lede">Turn photos of paper pages into one clean PDF. On a phone, use Take a photo and shoot one page at a time. Each page is cleaned up so it reads like a scan.</p>
+        <p class="lede">Upload a PDF and get a scanned copy of it: every page is turned into a clean, flat image, so it looks like it came off a scanner. You can also turn photos of paper pages into one PDF.</p>
         <div class="panel">
-          <label class="drop" data-drop="scan"><strong>Drop photos here or click to choose</strong><span>JPG, PNG or WebP. Pages go into the PDF in the order listed below.</span><input type="file" id="in-scan" accept="image/*" multiple></label>
+          <label class="drop" data-drop="scan"><strong>Drop PDFs or photos here, or click to choose</strong><span>Each PDF becomes its own scanned PDF. Photos (JPG, PNG, WebP) are joined into one PDF in the order listed below.</span><input type="file" id="in-scan" accept="application/pdf,.pdf,image/*" multiple></label>
           <div class="actions">
             <label class="btn ghost sm" for="in-scan-cam" style="cursor:pointer">Take a photo</label>
             <input type="file" id="in-scan-cam" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0">
@@ -298,14 +300,22 @@ ul.results li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;ali
               <div class="seg">
                 <label><input type="radio" name="scanfilter" value="clean" checked> Clean</label>
                 <label><input type="radio" name="scanfilter" value="bw"> Black &amp; white</label>
+                <label><input type="radio" name="scanfilter" value="color"> Colour</label>
                 <label><input type="radio" name="scanfilter" value="original"> Original</label>
               </div>
-              <p class="hint" style="margin-top:6px">Clean evens out the lighting and whitens the paper. Black &amp; white suits printed text.</p>
+              <p class="hint" style="margin-top:6px">Clean is greyscale with white paper. Black &amp; white suits printed text and gives the smallest file. Colour keeps colours, such as stamps and signatures in ink.</p>
             </fieldset>
-            <fieldset><legend>Page size</legend>
+            <fieldset><legend>Page size (photos only)</legend>
               <div class="seg">
                 <label><input type="radio" name="scanpage" value="a4" checked> A4</label>
                 <label><input type="radio" name="scanpage" value="photo"> Same shape as photo</label>
+              </div>
+            </fieldset>
+            <fieldset><legend>Sharpness (PDFs only)</legend>
+              <div class="seg">
+                <label><input type="radio" name="scandpi" value="150"> Small file</label>
+                <label><input type="radio" name="scandpi" value="200" checked> Standard</label>
+                <label><input type="radio" name="scandpi" value="300"> Sharp</label>
               </div>
             </fieldset>
             <fieldset><legend>Trim the edges of each photo</legend>
@@ -367,7 +377,7 @@ const fmt = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' K
 const isPdf = f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
 const isDocx = f => /\.docx$/i.test(f.name);
 const isImage = f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|bmp|heic)$/i.test(f.name);
-const FILTER = { merge: isPdf, rotate: isPdf, stamp: isPdf, pnum: isPdf, scan: isImage, word: isDocx };
+const FILTER = { merge: isPdf, rotate: isPdf, stamp: isPdf, pnum: isPdf, scan: f => isImage(f) || isPdf(f), word: isDocx };
 const RUN = { merge: () => doMerge(), word: () => doWord(), rotate: () => doRotate(), stamp: () => doStamp(), pnum: () => doPnum(), scan: () => doScan() };
 const NEED = { merge: 2, word: 1, rotate: 1, stamp: 1, pnum: 1, scan: 1 };
 
@@ -377,7 +387,7 @@ function addFiles(key, list) {
   ok.forEach(file => {
     const item = { id: ++uid, file, name: file.name, size: file.size };
     S[key].push(item);
-    if (key === 'scan') { item.rot = 0; item.url = URL.createObjectURL(file); }
+    if (key === 'scan' && !isPdf(file)) { item.rot = 0; item.url = URL.createObjectURL(file); }
     else if (key !== 'word') file.arrayBuffer().then(b => PDFDocument.load(b, { ignoreEncryption: true })).then(d => { item.pages = d.getPageCount(); renderList(key); }).catch(() => { item.bad = true; renderList(key); });
   });
   setStatus(key, skipped ? skipped + ' file' + (skipped > 1 ? 's were' : ' was') + ' skipped (wrong type).' : '', skipped ? 'err' : '');
@@ -392,7 +402,7 @@ function renderList(key) {
     const m = document.createElement('div'); m.className = 'fmeta' + (it.bad ? ' bad' : '');
     m.textContent = it.bad ? 'Could not read this file' : fmt(it.size) + (it.pages ? ' · ' + it.pages + (it.pages === 1 ? ' page' : ' pages') : '');
     left.append(n, m);
-    if (key === 'scan') {
+    if (key === 'scan' && !isPdf(it.file)) {
       const box = document.createElement('div'); box.style.cssText = 'width:48px;height:48px;flex:none;overflow:hidden;border:1px solid var(--line);border-radius:4px;background:var(--surface)';
       const im = document.createElement('img'); im.src = it.url; im.alt = ''; im.style.cssText = 'width:100%;height:100%;object-fit:contain;transform:rotate(' + it.rot + 'deg)'; box.append(im);
       const txt = document.createElement('div'); txt.style.minWidth = 0; txt.append(n, m);
@@ -401,7 +411,7 @@ function renderList(key) {
     }
     const act = document.createElement('div'); act.className = 'row-actions';
     const mk = (label, txt, a, dis) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'ib'; b.textContent = txt; b.setAttribute('aria-label', label + ' ' + it.name); b.dataset.key = key; b.dataset.i = i; b.dataset.act = a; b.disabled = !!dis; return b; };
-    if (key === 'scan') act.append(mk('Rotate left', '↺', 'rl'), mk('Rotate right', '↻', 'rr'));
+    if (key === 'scan' && !isPdf(it.file)) act.append(mk('Rotate left', '↺', 'rl'), mk('Rotate right', '↻', 'rr'));
     if (key === 'merge' || key === 'scan') { act.append(mk('Move up', '↑', 'up', i === 0), mk('Move down', '↓', 'down', i === S[key].length - 1)); }
     act.append(mk('Remove', '×', 'rm'));
     li.append(left, act); ul.append(li);
@@ -648,59 +658,137 @@ function localMeans(g, w, h, half) {
   }
   return out;
 }
-function enhance(ctx, w, h, mode) {
+/* Brightness at the given share of pixels from the top: ~the paper level when share is 0.1. */
+function topPercentile(vals, count, share) {
+  const hist = new Uint32Array(256); for (let i = 0; i < count; i++) hist[vals[i]]++;
+  let acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= count * share) return v; }
+  return 0;
+}
+/* Per-pixel paper brightness: the 90th percentile of each small cell, smoothed and stretched to every pixel.
+   It never drops below `floor` times the page-wide paper level, so big dark or coloured blocks are not mistaken for shadow. */
+function paperEstimate(g, w, h, floor) {
+  const n = w * h, C = Math.max(16, Math.round(Math.min(w, h) / 24)), gw = Math.ceil(w / C), gh = Math.ceil(h / C);
+  const lo = floor * topPercentile(g, n, 0.10);
+  let grid = new Float32Array(gw * gh);
+  const hist = new Uint32Array(256);
+  for (let cy = 0; cy < gh; cy++) for (let cx = 0; cx < gw; cx++) {
+    hist.fill(0); let cnt = 0;
+    for (let y = cy * C, ye = Math.min(h, y + C); y < ye; y++) for (let x = cx * C, xe = Math.min(w, cx * C + C); x < xe; x++) { hist[g[y * w + x]]++; cnt++; }
+    let acc = 0, p = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= cnt * 0.10) { p = v; break; } }
+    grid[cy * gw + cx] = Math.max(p, lo, 1);
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    const nx = new Float32Array(gw * gh);
+    for (let cy = 0; cy < gh; cy++) for (let cx = 0; cx < gw; cx++) {
+      let s = 0, c = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = cy + dy, xx = cx + dx; if (yy >= 0 && yy < gh && xx >= 0 && xx < gw) { s += grid[yy * gw + xx]; c++; } }
+      nx[cy * gw + cx] = s / c;
+    }
+    grid = nx;
+  }
+  const out = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    const fy = Math.min(gh - 1, Math.max(0, (y + 0.5) / C - 0.5)), y0 = Math.floor(fy), y1 = Math.min(gh - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < w; x++) {
+      const fx = Math.min(gw - 1, Math.max(0, (x + 0.5) / C - 0.5)), x0 = Math.floor(fx), x1 = Math.min(gw - 1, x0 + 1), tx = fx - x0;
+      out[y * w + x] = (grid[y0 * gw + x0] * (1 - tx) + grid[y0 * gw + x1] * tx) * (1 - ty) + (grid[y1 * gw + x0] * (1 - tx) + grid[y1 * gw + x1] * tx) * ty;
+    }
+  }
+  return out;
+}
+/* mode: clean (grey), color, or bw. floor: lowest paper level allowed relative to the page's brightest areas
+   (about 0.55 for photos with shadows, about 0.92 for PDFs that have no lighting to correct). */
+function enhance(ctx, w, h, mode, floor = 0.55) {
   const img = ctx.getImageData(0, 0, w, h), d = img.data, n = w * h;
   const g = new Uint8ClampedArray(n);
   for (let i = 0, j = 0; i < n; i++, j += 4) g[i] = (d[j] * 299 + d[j + 1] * 587 + d[j + 2] * 114) / 1000;
-  if (mode === 'clean') {
-    /* divide out uneven lighting (shadows, one bright side), then stretch so paper is white and ink is dark */
-    const bg = localMeans(g, w, h, Math.max(12, (Math.min(w, h) / 8) | 0)), flat = new Uint8ClampedArray(n);
-    for (let i = 0; i < n; i++) flat[i] = Math.min(255, g[i] / Math.max(20, bg[i] * 1.05) * 255);
+  if (mode === 'clean' || mode === 'color') {
+    const bg = paperEstimate(g, w, h, floor), flat = new Uint8ClampedArray(n);
+    for (let i = 0; i < n; i++) flat[i] = Math.min(255, g[i] / bg[i] * 255);
     const hist = new Uint32Array(256); for (let i = 0; i < n; i++) hist[flat[i]]++;
-    let acc = 0, lo = 0, hi = 255;
+    let acc = 0, lo = 0;
     for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.01) { lo = v; break; } }
-    acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= n * 0.35) { hi = v; break; } }
-    if (hi - lo < 30) lo = Math.max(0, hi - 30);
-    const k = 255 / Math.max(1, hi - lo);
-    for (let i = 0, j = 0; i < n; i++, j += 4) { const v = Math.max(0, Math.min(255, (flat[i] - lo) * k)); d[j] = d[j + 1] = d[j + 2] = v; d[j + 3] = 255; }
+    lo = Math.min(lo, 150);
+    const k = 255 / (238 - lo);   /* paper (about 255 after flattening) lands on pure white, the darkest ink on black */
+    if (mode === 'color') for (let i = 0, j = 0; i < n; i++, j += 4) { const sc = 255 / bg[i]; for (let q = 0; q < 3; q++) d[j + q] = Math.max(0, Math.min(255, (Math.min(255, d[j + q] * sc) - lo) * k)); d[j + 3] = 255; }
+    else for (let i = 0, j = 0; i < n; i++, j += 4) { const v = Math.max(0, Math.min(255, (flat[i] - lo) * k)); d[j] = d[j + 1] = d[j + 2] = v; d[j + 3] = 255; }
   } else {
-    const mean = localMeans(g, w, h, Math.max(8, (Math.min(w, h) / 12) | 0));
-    for (let i = 0, j = 0; i < n; i++, j += 4) { d[j] = d[j + 1] = d[j + 2] = g[i] < mean[i] * 0.88 ? 0 : 255; d[j + 3] = 255; }
+    /* black where a pixel is clearly darker than its surroundings, or simply very dark, so solid blocks stay solid */
+    const mean = localMeans(g, w, h, Math.max(8, (Math.min(w, h) / 12) | 0)), hard = 0.45 * topPercentile(g, n, 0.10);
+    for (let i = 0, j = 0; i < n; i++, j += 4) { d[j] = d[j + 1] = d[j + 2] = (g[i] < mean[i] * 0.88 || g[i] < hard) ? 0 : 255; d[j + 3] = 255; }
   }
   ctx.putImageData(img, 0, 0);
 }
 /*ENDENH*/
 $('#scan-trim').addEventListener('input', () => { $('#scan-trim-o').textContent = $('#scan-trim').value + '%'; });
 $('#in-scan-cam').addEventListener('change', e => { addFiles('scan', e.target.files); e.target.value = ''; });
+/*SCAN*/
+const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+async function jpegOf(c) {
+  if (c.toBlob) { const b = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85)); return new Uint8Array(await b.arrayBuffer()); }
+  return c.toBuffer('image/jpeg', 85);
+}
+const tick = () => new Promise(r => setTimeout(r, 0));
+async function addScanPage(out, c, pageMode, fixed) {
+  const jpg = await out.embedJpg(await jpegOf(c));
+  let PW, PH, x = 0, y = 0, w, h;
+  if (fixed) { PW = fixed[0]; PH = fixed[1]; w = PW; h = PH; }
+  else if (pageMode === 'a4') {
+    const land = c.width > c.height, M = 18; PW = land ? 841.89 : 595.28; PH = land ? 595.28 : 841.89;
+    const s = Math.min((PW - 2 * M) / c.width, (PH - 2 * M) / c.height); w = c.width * s; h = c.height * s; x = (PW - w) / 2; y = (PH - h) / 2;
+  } else { PW = 595.28; PH = PW * c.height / c.width; w = PW; h = PH; }
+  out.addPage([PW, PH]).drawImage(jpg, { x, y, width: w, height: h });
+}
+async function scanPdfFile(it, mode, dpi, pdfjs, make, progress) {
+  let doc;
+  try { doc = await pdfjs.getDocument({ data: new Uint8Array(await it.file.arrayBuffer()) }).promise; }
+  catch (e) { throw new Error(it.name + (e && e.name === 'PasswordException' ? ' is password-protected. Remove the password and try again.' : ' could not be read as a PDF.')); }
+  const out = await PDFDocument.create();
+  for (let i = 1; i <= doc.numPages; i++) {
+    progress(i, doc.numPages); await tick();
+    const page = await doc.getPage(i), base = page.getViewport({ scale: 1 });
+    let scale = dpi / 72; const px = base.width * scale * base.height * scale;
+    if (px > 6.5e6) scale *= Math.sqrt(6.5e6 / px);
+    const vp = page.getViewport({ scale }), c = make(Math.ceil(vp.width), Math.ceil(vp.height)), ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    if (mode !== 'original') enhance(ctx, c.width, c.height, mode, 0.92);
+    await addScanPage(out, c, '', [base.width, base.height]);
+    if (page.cleanup) page.cleanup();
+    c.width = c.height = 0;
+  }
+  if (doc.destroy) doc.destroy();
+  return { name: outName(it.name, '-scanned'), bytes: await out.save(), pages: out.getPageCount() };
+}
+/*ENDSCAN*/
 async function bitmapOf(file) {
   try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { return await createImageBitmap(file); }
 }
 async function doScan() {
-  const mode = $('input[name=scanfilter]:checked').value, pageMode = $('input[name=scanpage]:checked').value, trim = +$('#scan-trim').value / 100;
-  const out = await PDFDocument.create();
-  for (const it of S.scan) {
-    let bmp; try { bmp = await bitmapOf(it.file); } catch (e) { throw new Error(it.name + ' could not be read as an image. Try a JPG or PNG.'); }
-    const sx = bmp.width * trim, sy = bmp.height * trim, sw = bmp.width * (1 - 2 * trim), sh = bmp.height * (1 - 2 * trim);
-    const sideways = it.rot % 180 !== 0, scale = Math.min(1, 2200 / Math.max(sw, sh));
-    const cw = Math.round(sw * scale), ch = Math.round(sh * scale);
-    const c = document.createElement('canvas'); c.width = sideways ? ch : cw; c.height = sideways ? cw : ch;
-    const ctx = c.getContext('2d', { willReadFrequently: true });
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-    ctx.translate(c.width / 2, c.height / 2); ctx.rotate(it.rot * Math.PI / 180);
-    ctx.drawImage(bmp, sx, sy, sw, sh, -cw / 2, -ch / 2, cw, ch);
-    if (bmp.close) bmp.close();
-    if (mode !== 'original') enhance(ctx, c.width, c.height, mode);
-    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
-    const jpg = await out.embedJpg(new Uint8Array(await blob.arrayBuffer()));
-    let PW, PH, x = 0, y = 0, w, h;
-    if (pageMode === 'a4') {
-      const land = c.width > c.height, M = 18; PW = land ? 841.89 : 595.28; PH = land ? 595.28 : 841.89;
-      const s = Math.min((PW - 2 * M) / c.width, (PH - 2 * M) / c.height); w = c.width * s; h = c.height * s; x = (PW - w) / 2; y = (PH - h) / 2;
-    } else { PW = 595.28; PH = PW * c.height / c.width; w = PW; h = PH; }
-    out.addPage([PW, PH]).drawImage(jpg, { x, y, width: w, height: h });
-    c.width = c.height = 0;
+  const mode = $('input[name=scanfilter]:checked').value, pageMode = $('input[name=scanpage]:checked').value, trim = +$('#scan-trim').value / 100, dpi = +$('input[name=scandpi]:checked').value;
+  const photos = S.scan.filter(it => !isPdf(it.file)), pdfs = S.scan.filter(it => isPdf(it.file)), outs = [];
+  if (pdfs.length && !window.pdfjsLib) throw new Error('The PDF reader did not load. Check your connection and reload the page.');
+  if (pdfs.length) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  if (photos.length) {
+    const out = await PDFDocument.create();
+    for (const it of photos) {
+      let bmp; try { bmp = await bitmapOf(it.file); } catch (e) { throw new Error(it.name + ' could not be read as an image. Try a JPG or PNG.'); }
+      const sx = bmp.width * trim, sy = bmp.height * trim, sw = bmp.width * (1 - 2 * trim), sh = bmp.height * (1 - 2 * trim);
+      const sideways = it.rot % 180 !== 0, scale = Math.min(1, 2200 / Math.max(sw, sh));
+      const cw = Math.round(sw * scale), ch = Math.round(sh * scale);
+      const c = mkCanvas(sideways ? ch : cw, sideways ? cw : ch), ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.translate(c.width / 2, c.height / 2); ctx.rotate(it.rot * Math.PI / 180);
+      ctx.drawImage(bmp, sx, sy, sw, sh, -cw / 2, -ch / 2, cw, ch);
+      if (bmp.close) bmp.close();
+      if (mode !== 'original') enhance(ctx, c.width, c.height, mode);
+      await addScanPage(out, c, pageMode, null);
+      c.width = c.height = 0;
+    }
+    outs.push({ name: 'scan.pdf', bytes: await out.save(), pages: out.getPageCount() });
   }
-  return [{ name: 'scan.pdf', bytes: await out.save(), pages: out.getPageCount() }];
+  for (const it of pdfs) outs.push(await scanPdfFile(it, mode, dpi, window.pdfjsLib, mkCanvas, (i, n) => setStatus('scan', 'Scanning ' + it.name + ': page ' + i + ' of ' + n + '…')));
+  return outs;
 }
 
 /* ---------- word to pdf ---------- */
